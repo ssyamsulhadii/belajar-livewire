@@ -117,7 +117,8 @@ new class extends Component {
                 <!-- ================= STEP 1: DATA UTAMA ================= -->
                 @if ($step == 1)
                     <div class="panel needs-validation">
-                        <div class="row g-3">
+                        <span class="mb-3 bg-warning h5 py-1 px-2 rounded">Data Utama</span>
+                        <div class="row g-3 mt-1">
                             <x-partials.forms.input name="form.nama" label="Nama"
                                 wire:model="form.nama"></x-partials.forms.input>
                             <x-partials.forms.input name="form.nip" label="NIP" wire:model="form.nip"
@@ -146,14 +147,15 @@ new class extends Component {
                 <!-- ================= STEP 2: UPLOAD DOKUMEN ================= -->
                 @if ($step == 2)
                     <form class="panel needs-validation" wire:submit="save" method="POST">
-                        <div class="row g-3">
+                        <span class="mb-3 bg-warning h5 py-1 px-2 rounded">Unggah Dokumen</span>
+                        <div class="row g-3 mt-2">
                             <x-partials.forms.input name="form.foto" label="Foto" wire:model="form.foto"
                                 type="file"></x-partials.forms.input>
                             <x-partials.forms.input name="form.cv" wire:model="form.cv" label="Curriculum Vitae"
                                 type="file"></x-partials.forms.input>
                         </div>
                         <div class="d-flex justify-content-between align-items-center mt-4">
-                            <button type="button" wire:click="$set('step', 1)" class="btn btn-outline-warning">
+                            <button type="button" wire:click="$set('step', 1)" class="btn btn-outline-dark">
                                 &larr; Kembali ke Data Utama
                             </button>
                             <x-partials.forms.submit target="save" :is-update="(bool) $pegawai?->id" />
