@@ -11,6 +11,8 @@ new class extends Component {
     public ?Pegawai $pegawai = null;
     public $list_divisi;
     public $pangkat_golongan;
+    // Properti terpisah khusus untuk menampung NIP yang mau dicari/ditarik
+    public $search_nip = '';
     // Properti form yang merepresentasikan kolom tabel
     public array $form = [
         'nama' => '',
@@ -35,6 +37,7 @@ new class extends Component {
 
             // Mengisi array form secara otomatis menggunakan method only() dari Eloquent
             $this->form = $pegawai->only(array_keys($this->form));
+            $this->form['tanggal_lahir'] = $pegawai->tanggal_lahir->isoFormat('YYYY-MM-DD');
 
             // Simpan file lama jika diperlukan untuk pengecekan saat update
             $this->old_foto = $pegawai->foto;
@@ -46,20 +49,29 @@ new class extends Component {
 
     public function nextStep()
     {
-        // Pindah ke step berikutnya (Upload Dokumen)
+        // 1. Validasi data teks di step 1
+        $validated = $this->validate([
+            'form.nama' => 'required|string|max:255',
+            'form.nip' => 'required|size:18|unique:pegawai,nip,' . ($this->pegawai?->id ?? 'NULL'),
+            'form.tanggal_lahir' => 'required|date',
+            'form.pangkat_golongan' => 'required|string',
+            'form.jabatan' => 'required|string|max:255',
+            'form.divisi_id' => 'required|exists:divisi,id',
+            'form.alamat' => 'required|string',
+            'form.status' => 'required|boolean',
+        ]);
+        // 2. Simpan/Update data step 1 ke database sebagai draft
+        // updateOrCreate akan mengecek apakah $this->pegawai sudah punya ID atau belum
+        $this->pegawai = Pegawai::updateOrCreate(['id' => $this->pegawai?->id], $validated['form']);
         $this->step = 2;
-        // $this->validate([
-        //     'form.nama' => 'required|string|max:255',
-        //     'form.nip' => 'required|size:18|unique:pegawai,nip,' . ($this->pegawai?->id ?? 'NULL'),
-        //     'form.tanggal_lahir' => 'required|date',
-        //     'form.pangkat_golongan' => 'required|string',
-        //     'form.jabatan' => 'required|string|max:255',
-        //     'form.divisi_id' => 'required|exists:divisi,id',
-        //     'form.alamat' => 'required|string',
-        //     'form.status' => 'required|boolean',
-        //     'form.foto' => 'nullable|image|max:2048', // Max 2MB
-        //     'form.cv' => 'nullable|mimes:pdf|max:5120', // Max 5MB PDF
-        // ]);
+        $this->reset(['search_nip']);
+    }
+    public function save()
+    {
+        $this->validate([
+            'form.foto' => 'nullable|image|max:1200',
+            'form.cv' => 'nullable|mimes:pdf|max:1200',
+        ]);
     }
 
     private function callData(?string $key = null)
@@ -97,6 +109,49 @@ new class extends Component {
         // 👉 Jika tidak, kembalikan semua
         return $data;
     }
+
+    public function fetchByNip()
+    {
+        $this->validate(
+            ['search_nip' => 'required|size:18'],
+            [
+                'search_nip.required' => 'Kolom NIP pencarian wajib diisi.',
+                'search_nip.size' => 'NIP harus tepat 18 digit.',
+            ],
+        );
+        $existingPegawai = Pegawai::firstWhere('nip', $this->search_nip);
+        if ($existingPegawai) {
+            // Masukkan data lama ke form utama, termasuk NIP-nya
+            $this->form['nip'] = $existingPegawai->nip;
+            $this->form['nama'] = $existingPegawai->nama;
+            $this->form['tanggal_lahir'] = $existingPegawai->tanggal_lahir->isoFormat('YYYY-MM-DD'); // Format tanggal lahir ke format Y-m-d
+            $this->form['pangkat_golongan'] = $existingPegawai->pangkat_golongan;
+            $this->form['jabatan'] = $existingPegawai->jabatan;
+            $this->form['divisi_id'] = $existingPegawai->divisi_id;
+            $this->form['alamat'] = $existingPegawai->alamat;
+            $this->form['status'] = $existingPegawai->status;
+            $this->pegawai = $existingPegawai; // Simpan referensi pegawai yang ditemukan
+            session()->flash('success_nip', 'Data berhasil ditarik dari NIP yang pernah terdaftar!');
+        } else {
+            session()->flash('error_nip', 'NIP tidak ditemukan dalam database.');
+        }
+    }
+
+    protected function validationAttributes()
+    {
+        return [
+            'form.nama' => 'Nama',
+            'form.nip' => 'NIP',
+            'form.tanggal_lahir' => 'Tanggal Lahir',
+            'form.pangkat_golongan' => 'Pangkat/Golongan',
+            'form.jabatan' => 'Jabatan',
+            'form.divisi_id' => 'Divisi',
+            'form.alamat' => 'Alamat',
+            'form.status' => 'Status',
+            'form.foto' => 'Foto',
+            'form.cv' => 'CV',
+        ];
+    }
 };
 ?>
 
@@ -119,6 +174,39 @@ new class extends Component {
                     <div class="panel needs-validation">
                         <span class="mb-3 bg-warning h5 py-1 px-2 rounded">Data Utama</span>
                         <div class="row g-3 mt-1">
+                            <!-- FITUR KHUSUS CREATE UNTUK MAPPING DATA BY NIP -->
+                            <div class="col-12">
+                                <label class="form-label fw-bold text-primary">Tarik Data Berdasarkan
+                                    NIP Jika sebelumnya pernah terdaftar</label>
+                                <div class="input-group">
+                                    <input type="number" wire:model="search_nip" class="form-control"
+                                        placeholder="Masukkan 18 digit NIP..." maxlength="18">
+                                    <button type="button" wire:click="fetchByNip" class="btn btn-outline-primary"
+                                        wire:loading.attr="disabled">
+                                        <span wire:loading.remove wire:target="fetchByNip">
+                                            <i class="bi bi-cloud-download"></i> Tarik Data
+                                        </span>
+                                        <span wire:loading wire:target="fetchByNip">
+                                            <span class="spinner-border spinner-border-sm" role="status"
+                                                aria-hidden="true"></span> Memuat...
+                                        </span>
+                                    </button>
+                                </div>
+                                @error('search_nip')
+                                    <span class="text-danger small">{{ $message }}</span>
+                                @enderror
+
+                                @if (session()->has('success_nip'))
+                                    <div class="text-success small mt-1"><i class="bi bi-check-circle"></i>
+                                        {{ session('success_nip') }}</div>
+                                @endif
+                                @if (session()->has('error_nip'))
+                                    <div class="text-danger small mt-1"><i class="bi bi-exclamation-circle"></i>
+                                        {{ session('error_nip') }}</div>
+                                @endif
+                                <hr class="my-3 text-muted">
+                            </div>
+
                             <x-partials.forms.input name="form.nama" label="Nama"
                                 wire:model="form.nama"></x-partials.forms.input>
                             <x-partials.forms.input name="form.nip" label="NIP" wire:model="form.nip"
