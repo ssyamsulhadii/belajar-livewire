@@ -1,5 +1,6 @@
 <?php
 
+use Symfony\Component\HttpFoundation\StreamedResponse;
 use App\Models\Pegawai;
 use Livewire\Component;
 use Livewire\WithPagination;
@@ -49,6 +50,35 @@ new class extends Component {
             'list_pegawai' => $list_pegawai,
         ]);
     }
+
+    public function exportCsv(): StreamedResponse
+    {
+        return response()->streamDownload(
+            function () {
+                $handle = fopen('php://output', 'w');
+
+                // Menambahkan BOM (Byte Order Mark) UTF-8 agar karakter khusus
+                // dan format teks terbaca dengan rapi saat dibuka di Microsoft Excel
+                fwrite($handle, "\xEF\xBB\xBF");
+
+                // 1. Buat Header Kolom CSV
+                fputcsv($handle, ['NIP', 'Nama', 'Pangkat Golongan', 'Jabatan', 'Tanggal Lahir']);
+
+                // 2. Ambil data database secara chunk (per 100 data) agar aman untuk performa server
+                Pegawai::chunk(1000, function ($list_pegawai) use ($handle) {
+                    foreach ($list_pegawai as $pegawai) {
+                        fputcsv($handle, [$pegawai->nip, $pegawai->nama, $pegawai->pangkat_golongan, $pegawai->jabatan, $pegawai->tanggal_lahir->isoFormat('DD-MM-YYYY')]);
+                    }
+                });
+
+                fclose($handle);
+            },
+            'data-pegawai-' . date('YmdHisv') . '.csv',
+            [
+                'Content-Type' => 'text/csv',
+            ],
+        );
+    }
 };
 ?>
 
@@ -68,6 +98,15 @@ new class extends Component {
                                 title="Tambah Data">
                                 <i class="bi bi-plus"></i>
                             </a>
+                            <button wire:click="exportCsv" class="btn btn-sm btn-success me-2">
+                                <span wire:loading.remove wire:target="exportCsv">
+                                    <i class="bi bi-file-earmark-spreadsheet me-1"></i> Ekspor CSV
+                                </span>
+                                <span wire:loading wire:target="exportCsv">
+                                    <span class="spinner-border spinner-border-sm" role="status"
+                                        aria-hidden="true"></span> Menyiapkan...
+                                </span>
+                            </button>
                         </div>
                         <div style="width: 250px;">
                             <x-partials.forms.input-search />
