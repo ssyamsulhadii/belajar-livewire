@@ -34,7 +34,6 @@ new class extends Component {
     {
         if ($pegawai && $pegawai->exists) {
             $this->pegawai = $pegawai;
-
             // Mengisi array form secara otomatis menggunakan method only() dari Eloquent
             $this->form = $pegawai->only(array_keys($this->form));
             $this->form['tanggal_lahir'] = $pegawai->tanggal_lahir->isoFormat('YYYY-MM-DD');
@@ -63,15 +62,83 @@ new class extends Component {
         // 2. Simpan/Update data step 1 ke database sebagai draft
         // updateOrCreate akan mengecek apakah $this->pegawai sudah punya ID atau belum
         $this->pegawai = Pegawai::updateOrCreate(['id' => $this->pegawai?->id], $validated['form']);
+        $this->old_foto = $this->pegawai->foto;
+        $this->old_cv = $this->pegawai->cv;
         $this->step = 2;
-        $this->reset(['search_nip']);
+        // $this->reset(['search_nip']);
     }
     public function save()
     {
-        $this->validate([
-            'form.foto' => 'nullable|image|max:1200',
-            'form.cv' => 'nullable|mimes:pdf|max:1200',
-        ]);
+        return to_route('pegawai.index')->with('success', 'Data pegawai berhasil disimpan!');
+    }
+
+    // Lifecycle hook utama Livewire untuk mendeteksi perubahan input
+    public function updated($propertyName, $value)
+    {
+        // 1. Cek untuk form.foto
+        if ($propertyName === 'form.foto' && $value) {
+            $this->uploadFile(file: $value, validationRule: 'image|max:1200', storageFolder: 'upload/foto', dbColumn: 'foto', oldFileVariable: $this->old_foto, sessionKey: 'success_foto', successMessage: 'Foto berhasil tersimpan.');
+        }
+
+        // 2. Contoh jika nanti Anda ingin menambahkan form.cv (Dokumen PDF)
+        if ($propertyName === 'form.cv' && $value) {
+            $this->uploadFile(file: $value, validationRule: 'mimes:pdf|max:2048', storageFolder: 'upload/cv', dbColumn: 'cv', oldFileVariable: $this->old_cv, sessionKey: 'success_cv', successMessage: 'CV berhasil tersimpan.');
+        }
+    }
+
+    /**
+     * Helper function privat untuk menghandle upload, validasi, dan hapus file lama secara dinamis.
+     */
+    private function uploadFile($file, string $validationRule, string $storageFolder, string $dbColumn, &$oldFileVariable, string $sessionKey, string $successMessage)
+    {
+        // 1. Validasi file secara dinamis
+        $this->validate(["form.{$dbColumn}" => $validationRule]);
+        if ($file) {
+            // 2. Hapus file fisik lama di storage jika sebelumnya sudah ada
+            if ($oldFileVariable) {
+                Storage::disk('public')->delete($storageFolder . '/' . $oldFileVariable);
+            }
+            // 3. Buat nama file unik menggunakan hashName
+            $fileName = $file->hashName();
+            // 4. Simpan file fisik ke folder tujuan
+            $file->storeAs($storageFolder, $fileName, 'public');
+            // 5. Update database record pegawai yang aktif
+            if ($this->pegawai) {
+                $this->pegawai->update([$dbColumn => $fileName]);
+            }
+            // 6. Perbarui variabel referensi file lama (agar tombol preview langsung mengarah ke file baru)
+            $oldFileVariable = $fileName;
+            // 7. Berikan session flash sukses
+            session()->flash($sessionKey, $successMessage);
+        }
+    }
+
+    public function fetchByNip()
+    {
+        $this->validate(
+            ['search_nip' => 'required|size:18'],
+            [
+                'search_nip.required' => 'Kolom NIP pencarian wajib diisi.',
+                'search_nip.size' => 'NIP harus tepat 18 digit.',
+            ],
+        );
+        $existingPegawai = Pegawai::firstWhere('nip', $this->search_nip);
+        if ($existingPegawai) {
+            // Masukkan data lama ke form utama, termasuk NIP-nya
+            $this->form['nip'] = $existingPegawai->nip;
+            $this->form['nama'] = $existingPegawai->nama;
+            $this->form['tanggal_lahir'] = $existingPegawai->tanggal_lahir->isoFormat('YYYY-MM-DD'); // Format tanggal lahir ke format Y-m-d
+            $this->form['pangkat_golongan'] = $existingPegawai->pangkat_golongan;
+            $this->form['jabatan'] = $existingPegawai->jabatan;
+            $this->form['divisi_id'] = $existingPegawai->divisi_id;
+            $this->form['alamat'] = $existingPegawai->alamat;
+            $this->form['status'] = $existingPegawai->status;
+            // Simpan referensi pegawai untuk mengabaikan validasi unique NIP
+            $this->pegawai = $existingPegawai;
+            session()->flash('success_nip', 'Data berhasil ditarik dari NIP yang pernah terdaftar!');
+        } else {
+            session()->flash('error_nip', 'NIP tidak ditemukan dalam database.');
+        }
     }
 
     private function callData(?string $key = null)
@@ -108,33 +175,6 @@ new class extends Component {
 
         // 👉 Jika tidak, kembalikan semua
         return $data;
-    }
-
-    public function fetchByNip()
-    {
-        $this->validate(
-            ['search_nip' => 'required|size:18'],
-            [
-                'search_nip.required' => 'Kolom NIP pencarian wajib diisi.',
-                'search_nip.size' => 'NIP harus tepat 18 digit.',
-            ],
-        );
-        $existingPegawai = Pegawai::firstWhere('nip', $this->search_nip);
-        if ($existingPegawai) {
-            // Masukkan data lama ke form utama, termasuk NIP-nya
-            $this->form['nip'] = $existingPegawai->nip;
-            $this->form['nama'] = $existingPegawai->nama;
-            $this->form['tanggal_lahir'] = $existingPegawai->tanggal_lahir->isoFormat('YYYY-MM-DD'); // Format tanggal lahir ke format Y-m-d
-            $this->form['pangkat_golongan'] = $existingPegawai->pangkat_golongan;
-            $this->form['jabatan'] = $existingPegawai->jabatan;
-            $this->form['divisi_id'] = $existingPegawai->divisi_id;
-            $this->form['alamat'] = $existingPegawai->alamat;
-            $this->form['status'] = $existingPegawai->status;
-            $this->pegawai = $existingPegawai; // Simpan referensi pegawai yang ditemukan
-            session()->flash('success_nip', 'Data berhasil ditarik dari NIP yang pernah terdaftar!');
-        } else {
-            session()->flash('error_nip', 'NIP tidak ditemukan dalam database.');
-        }
     }
 
     protected function validationAttributes()
@@ -236,17 +276,22 @@ new class extends Component {
                 @if ($step == 2)
                     <form class="panel needs-validation" wire:submit="save" method="POST">
                         <span class="mb-3 bg-warning h5 py-1 px-2 rounded">Unggah Dokumen</span>
-                        <div class="row g-3 mt-2">
-                            <x-partials.forms.input name="form.foto" label="Foto" wire:model="form.foto"
-                                type="file"></x-partials.forms.input>
-                            <x-partials.forms.input name="form.cv" wire:model="form.cv" label="Curriculum Vitae"
-                                type="file"></x-partials.forms.input>
+                        <div class="row g-4 mt-2">
+                            <x-partials.forms.input-file name="form.foto" label="Pas Foto" accept="image/*"
+                                maxSize="1.2MB" formatDesc="jpeg/jpg/png" :oldFile="$old_foto" folderPath="upload/foto"
+                                icon="bi-file-earmark-image" />
+
+                            <x-partials.forms.input-file name="form.cv" label="Curriculum Vitae" accept=".pdf"
+                                maxSize="1.2MB" formatDesc="PDF" :oldFile="$old_cv" folderPath="upload/cv"
+                                icon="bi-file-earmark-pdf" />
                         </div>
+
+
                         <div class="d-flex justify-content-between align-items-center mt-4">
                             <button type="button" wire:click="$set('step', 1)" class="btn btn-outline-dark">
                                 &larr; Kembali ke Data Utama
                             </button>
-                            <x-partials.forms.submit target="save" :is-update="(bool) $pegawai?->id" />
+                            <x-partials.forms.submit target="save" :is-update="(bool) false" />
                         </div>
                     </form>
                 @endif
